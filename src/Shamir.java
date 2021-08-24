@@ -1,142 +1,87 @@
 
-import java.lang.Math;
+import java.util.Random;
+
 public class Shamir {
 
-	   private static final int prime = 257;
+	private static final int prime = 257;
 
-    public static int[] gcdD(int a, int b) {
-        int[] xyz = new int[3];
+	private static int modular_exponentiation(int base, int exp, int mod) {
+		if (exp == 0) {
+			return 1;
+		} else if (exp % 2 == 0) {
+			int mysqrt = modular_exponentiation(base, exp / 2, mod);
+			return (mysqrt * mysqrt) % mod;
+		} else {
+			return (base * modular_exponentiation(base, exp - 1, mod)) % mod;
+		}
+	}
 
-        if (b == 0) {
-            xyz[0] = a;
-            xyz[1] = 1;
-            xyz[2] = 0;
-        } else {
-            int n = (int) Math.floor(a / b);
-            int c = a % b;
-            int[] r = gcdD(b, c);
+	private static int[] split_number(int number, int n, int t) {
+		int[] shares = new int[n];
+		int[] coef = new int[t];
+		coef[0] = number;
+		for(int i = 1; i < t; ++i) {
+			Random r = new Random();
+			coef[i] = r.nextInt(prime);
+		}
 
-            xyz[0] = r[0];
-            xyz[1] = r[2];
-            xyz[2] = r[1] - r[2] * n;
+		for (int x = 0; x < n; ++x) {
+			int y = coef[0];
 
-        }
+			/* Calculate the shares */
+			for (int i = 1; i < t; ++i) {
+				int temp = modular_exponentiation(x + 1, i, prime);
 
-        return xyz;
-    }
+				y = (y + (coef[i] * temp % prime)) % prime;
+			}
 
-    public static int modInverse(int k) {
-        k = k % prime;
+			/* Sometimes we're getting negative numbers, and need to fix that */
+			y = (y + prime) % prime;
 
-        int r;
-        int[] xyz;
+			shares[x] = y;
+		}
 
-        if (k < 0) {
-            xyz = gcdD(prime, -k);
-            r = -xyz[2];
-        } else {
-            xyz = gcdD(prime, k);
-            r = xyz[2];
-        }
+		return shares;
+	}
 
-        return (prime + r) % prime;
-    }
+	public static String[] split_string(String secret, int n, int t) {
+		int len = secret.length();
 
-    public static int join_shares(int[] xy_pairs, int n) {
-        int secret = 0;
-        int numerator;
-        int denominator;
-        int startposition;
-        int nextposition;
-        int value;
-        int i;
-        int j;
+		String[] shares = new String[n];
+		for (int i = 0; i < n; ++i) {
+			shares[i] = String.format("%02X%02XAA", (i+1), t);
+		}
 
-        // Pairwise calculations between all shares
-        for (i = 0; i < n; ++i) {
-            numerator = 1;
-            denominator = 1;
+		/* Now, handle the secret */
 
-            for (j = 0; j < n; ++j) {
-                if (i != j) {
-                    startposition = xy_pairs[i * 2];        // x for share i
-                    nextposition = xy_pairs[j * 2];        // x for share j
-                    numerator = (numerator * -nextposition) % prime;
-                    denominator = (denominator * (startposition - nextposition)) % prime;
-                }
-            }
+		for (int i = 0; i < len; ++i) {
+			int letter = secret.charAt(i); // - '0';
 
-            value = xy_pairs[i * 2 + 1];
+			if (letter < 0) {
+				letter = 256 + letter;
+			}
 
-            secret = (secret + (value * numerator * modInverse(denominator))) % prime;
-        }
+			int[] chunks = split_number(letter, n, t);
 
-        /* Sometimes we're getting negative numbers, and need to fix that */
-        secret = (secret + prime) % prime;
+			for (int j = 0; j < n; ++j) {
+				if (chunks[j] == 256) {
+					shares[j]  += String.format("%s", "G0");
+				} else {
 
-        return secret;
-    }
+					shares[j] += String.format("%02X", chunks[j]);
+				}
+			}
 
-    public static String joinStrings(String[] shares, int n) {
-        int len = (shares[0].length() - 6) / 2;
-        String result = "";
-        char[] codon = new char[2];
-        int[] x = new int[n];
+		}
 
-        // Determine x value for each share
-        for (int i = 0; i < n; ++i) {
-            if (shares[i] == null) {
-                return null;
-            }
-
-            codon[0] = shares[i].charAt(0);
-            codon[1] = shares[i].charAt(1);
-
-            x[i] = Integer.parseInt("" + codon[0] + codon[1], 16);
-        }
+		return shares;
+	}
 
 
-        // Iterate through characters and calculate original secret
-        for (int i = 0; i < len; ++i) {
-            int[] chunks = new int[n * 2];
 
-            // Collect all shares for character i
-            for (int j = 0; j < n; ++j) {
-                // Store x value for share
-                chunks[j * 2] = x[j];
-
-                codon[0] = shares[j].charAt(6 + i * 2);
-                codon[1] = shares[j].charAt(6 + i * 2 + 1);
-
-                String codi = "" + codon[0] + codon[1];
-                // Store y value for share
-                if (codi.equals("G0")) {
-                    chunks[j * 2 + 1] = 256;
-                } else {
-                    chunks[j * 2 + 1] = Integer.parseInt("" + codon[0] + codon[1], 16);
-                }
-            }
-
-            //unsigned char letter = join_shares(chunks, n);
-            char letter = (char) join_shares(chunks, n);
-            result = result + String.format("%c", letter);
-        }
-
-        return result;
-    }
-
-
-    public static String extractSecretFromShareStrings(String[] strings) {
-        
-        String secret = joinStrings(strings, strings.length);
-        
-        return secret;
-    }
-
-    public static void main(String[] args) {
-        // TODO Auto-generated method stub
-        String[] shares = new String[]{"0103AA73C196959FF88843EA3B6892C72762107043EF656B2E41E45AEE636866BB139A5BCA6B184963DCF13955E7DABFB890614EADE1F07ACE581038497BB77AA6198C736536599F709A5CE775266B047E01F57E9B6737E82D1D6D35B08878725DE7CD9CFD3AE1EDED085B7CBAC4919A139F", "0203AA79824828C490042EDB7FEDC96E10042A48B9EB262328A8C23A597B7B31CB97C009B7EDF42456457737E59497C2FF9660FB40EDD5056865F8C6990190D2EE9970EE3267239E43E14B4FA6E522612740D7CD136B909CC077CBF9BC133F2719D057C17EE1CAFFE0E854879749BDDD3C71", "0303AA86B48C1CB301E0FB3A3AD0115C2F32A3BCCE44B4803468DD01A68E6FAE87D7BD6C2DDAD8011B88E733147B6F6B47606C66F174FEEB035D17105C0D004C08CCG0B2BED8944AD2451785F5AB7D8A2DEE1334BC7A6386087F5E9591FA8A55811F02E0FD49EF7D2FD56291EDE4F7FED5AE"};
-        System.out.println(extractSecretFromShareStrings(shares));
-    }
+	public static void main(String[] args) {
+		String[] shares = split_string("tpubD8iUw4tBBwUdScqzUiK7rhaMVdHkzzwsX6TzkCF7gddy4kwpwgVChSZ1VRnWKn2EdcrjHydZ6apcjoRnezv6Z1bzrBus4PsUEhfmhaPbF9j", 5, 3);
+		System.out.println(DeShamir.extractSecretFromShareStrings(shares));
+	}
 
 }
